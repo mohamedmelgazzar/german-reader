@@ -368,16 +368,32 @@ function pickVoice() {
 }
 if (window.speechSynthesis) { pickVoice(); speechSynthesis.onvoiceschanged = pickVoice; }
 
+/* Chrome bug workaround: speak() called right after cancel() is often dropped,
+   so we wait a moment after cancelling. We also keep a reference to the
+   utterance (Chrome can garbage-collect it mid-speech) and call resume()
+   in case Chrome left the speech engine paused. */
+let speakToken = 0;
+let lastUtterance = null;
 function speak(text, opts = {}) {
   if (!window.speechSynthesis) return null;
-  const u = new SpeechSynthesisUtterance(text);
-  u.lang = "de-DE";
-  if (deVoice) u.voice = deVoice;
-  u.rate = opts.rate || rate;
-  if (opts.onend) u.onend = opts.onend;
+  if (!deVoice) pickVoice();
+  const myToken = ++speakToken;
+  const wasBusy = speechSynthesis.speaking || speechSynthesis.pending;
   if (!opts.queue) speechSynthesis.cancel();
-  speechSynthesis.speak(u);
-  return u;
+  const go = () => {
+    if (myToken !== speakToken) return;          // a newer click replaced this one
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = "de-DE";
+    if (deVoice) u.voice = deVoice;
+    u.rate = opts.rate || rate;
+    u.volume = 1;
+    if (opts.onend) u.onend = opts.onend;
+    lastUtterance = u;
+    speechSynthesis.resume();
+    speechSynthesis.speak(u);
+  };
+  if (wasBusy && !opts.queue) setTimeout(go, 80); else go();
+  return true;
 }
 
 /* ---------- rendering ---------- */
@@ -507,7 +523,9 @@ function emptyPanel() {
     <p><strong>Click any word</strong> in the story to see its English meaning and hear it.</p>
     <p>Words you click turn yellow. Mark them as known when you're sure, and they lose their color.</p>
     <p>Use the speaker next to a sentence to hear the whole sentence, or press play to hear the story.</p>
+    <button class="btn" type="button" id="testSound">Test sound</button>
     <div class="note" id="voiceNote"></div></div>`;
+  $("testSound").onclick = () => speak("Hallo! Das ist deine deutsche Stimme.");
   setTimeout(() => {
     const n = $("voiceNote"); if (!n) return;
     if (!window.speechSynthesis) n.textContent = "Your browser has no speech voice, so audio won't play here. Try Chrome, Edge or Safari.";
@@ -522,7 +540,7 @@ function highlightSentence(i) {
   if (i >= 0) { const el = $("sent-" + i); el && el.scrollIntoView({ block: "nearest", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" }); }
 }
 function updatePlayAll() { $("playAll").innerHTML = (playingAll ? ICON.stop + "Stop" : ICON.play + "Play story"); }
-function stopAll() { playingAll = false; if (window.speechSynthesis) speechSynthesis.cancel(); highlightSentence(-1); updatePlayAll(); }
+function stopAll() { playingAll = false; speakToken++; if (window.speechSynthesis) speechSynthesis.cancel(); highlightSentence(-1); updatePlayAll(); }
 function playFrom(i) {
   const s = STORIES[current];
   if (!playingAll || i >= s.sentences.length) { stopAll(); return; }
