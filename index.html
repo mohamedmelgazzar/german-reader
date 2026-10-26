@@ -1,0 +1,554 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Mein Deutsch Reader</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Literata:opsz,wght@7..72,400;7..72,600&family=Figtree:wght@400;500;600;700&display=swap">
+<style>
+/* Layout: reading column on the left, sticky word panel on the right; panel becomes a bottom sheet on phones */
+:root {
+  --bg: #f4f6f8;
+  --paper: #ffffff;
+  --ink: #18212c;
+  --muted: #5d6a78;
+  --line: #dde3ea;
+  --accent: #23497a;
+  --accent-ink: #ffffff;
+  --new: #dbe8fb;        /* word not seen yet */
+  --learning: #fbe7a6;   /* word you clicked */
+  --learning-edge: #e0b93d;
+  --playing: #e9eef5;
+  --read: "Literata", Georgia, "Times New Roman", serif;
+  --ui: "Figtree", system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #12171d; --paper: #1a2129; --ink: #e8edf2; --muted: #9aa7b4; --line: #2c3540;
+    --accent: #8fb4ec; --accent-ink: #0f1620;
+    --new: #213651; --learning: #5a4a17; --learning-edge: #c9a23a; --playing: #232d39;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #12171d; --paper: #1a2129; --ink: #e8edf2; --muted: #9aa7b4; --line: #2c3540;
+  --accent: #8fb4ec; --accent-ink: #0f1620;
+  --new: #213651; --learning: #5a4a17; --learning-edge: #c9a23a; --playing: #232d39;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--ink); font-family: var(--ui); font-size: 15px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 20px 40px;
+}
+button { font: inherit; color: inherit; cursor: pointer; }
+button:focus-visible, .w:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.wrap { max-width: 1100px; margin: 0 auto; display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 24px; align-items: start; }
+
+header.top { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+.brand { display: flex; align-items: baseline; gap: 10px; }
+.brand h1 { font-family: var(--read); font-weight: 600; font-size: 22px; margin: 0; }
+.brand span { color: var(--muted); font-size: 13px; }
+.tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+.tab { border: 1px solid var(--line); background: var(--paper); padding: 7px 14px; border-radius: 999px; font-weight: 500; font-size: 14px; }
+.tab[aria-selected="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+
+.reader { background: var(--paper); border: 1px solid var(--line); border-radius: 14px; padding: 28px clamp(18px, 4vw, 40px) 32px; min-width: 0; }
+.story-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 14px; margin-bottom: 22px; }
+.story-head .lvl { font-size: 12px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.story-head h2 { font-family: var(--read); font-size: 30px; font-weight: 600; margin: 4px 0 0; text-wrap: balance; }
+.controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.btn { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); background: var(--paper); border-radius: 10px; padding: 8px 12px; font-size: 14px; font-weight: 500; }
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.btn svg { width: 16px; height: 16px; flex: none; }
+.speed { display: inline-flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.speed button { border: 0; background: transparent; padding: 8px 10px; font-size: 13px; font-variant-numeric: tabular-nums; }
+.speed button[aria-pressed="true"] { background: var(--playing); font-weight: 700; }
+
+.sentences { display: flex; flex-direction: column; gap: 6px; max-width: 66ch; }
+.sent { display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 6px; padding: 6px 8px 6px 0; border-radius: 10px; }
+.sent.playing { background: var(--playing); }
+.sent .play { width: 28px; height: 28px; border-radius: 50%; border: 0; background: transparent; color: var(--muted); display: grid; place-items: center; margin-top: 4px; }
+.sent .play:hover { color: var(--accent); background: var(--playing); }
+.sent .play svg { width: 15px; height: 15px; }
+.de { font-family: var(--read); font-size: 22px; line-height: 1.75; }
+.w { border-radius: 5px; padding: 1px 3px; margin: 0 -1px; cursor: pointer; transition: background .15s; }
+.w.s-new { background: var(--new); }
+.w.s-learning { background: var(--learning); }
+.w.active { box-shadow: 0 0 0 2px var(--learning-edge); }
+.w:hover { filter: brightness(.96); }
+.en-row { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.en-toggle { border: 0; background: none; color: var(--muted); font-size: 12px; font-weight: 600; letter-spacing: .06em; padding: 0; text-decoration: underline; text-underline-offset: 3px; }
+.en { color: var(--muted); font-size: 15px; }
+.legend { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 26px; padding-top: 16px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; align-items: center; }
+.legend i { display: inline-block; width: 14px; height: 14px; border-radius: 4px; vertical-align: -2px; margin-right: 6px; border: 1px solid var(--line); }
+.legend .reset { margin-left: auto; border: 0; background: none; color: var(--muted); text-decoration: underline; font-size: 13px; }
+
+/* word panel */
+.panel { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 16px); background: var(--paper); border: 1px solid var(--line); border-radius: 14px; padding: 22px; min-width: 0; }
+.panel .empty { color: var(--muted); line-height: 1.55; }
+.panel .empty strong { color: var(--ink); }
+.p-word { display: flex; align-items: center; gap: 10px; }
+.p-word h3 { font-family: var(--read); font-size: 30px; font-weight: 600; margin: 0; overflow-wrap: anywhere; }
+.iconbtn { width: 38px; height: 38px; border-radius: 10px; border: 1px solid var(--line); background: var(--paper); display: grid; place-items: center; flex: none; }
+.iconbtn svg { width: 18px; height: 18px; }
+.p-base { color: var(--muted); margin-top: 4px; font-size: 14px; }
+.p-label { font-size: 12px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin-top: 20px; }
+.p-meaning { font-size: 22px; font-weight: 600; margin-top: 6px; }
+.p-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
+.p-spell { font-family: var(--read); font-size: 18px; letter-spacing: .25em; margin-top: 8px; color: var(--muted); min-height: 1.4em; }
+.p-close { display: none; }
+.note { font-size: 12.5px; color: var(--muted); margin-top: 18px; line-height: 1.5; }
+
+@media (max-width: 860px) {
+  .wrap { grid-template-columns: minmax(0, 1fr); }
+  .panel { position: fixed; left: 0; right: 0; bottom: 0; top: auto; border-radius: 16px 16px 0 0;
+    padding: 18px max(18px, env(safe-area-inset-right, 0px)) calc(18px + env(safe-area-inset-bottom, 0px)) max(18px, env(safe-area-inset-left, 0px));
+    box-shadow: 0 -8px 30px rgba(0,0,0,.18); z-index: 20; max-height: 70vh; overflow-y: auto; }
+  .panel.closed { display: none; }
+  .p-close { display: grid; margin-left: auto; }
+  .de { font-size: 20px; }
+  body { padding-bottom: 260px; }
+}
+@media (prefers-reduced-motion: reduce) { .w { transition: none; } }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header class="top">
+    <div class="brand"><h1>Mein Deutsch Reader</h1><span>A1 · German → English</span></div>
+    <div class="tabs" id="tabs" role="tablist"></div>
+  </header>
+
+  <main class="reader">
+    <div class="story-head">
+      <div>
+        <div class="lvl" id="storyLvl"></div>
+        <h2 id="storyTitle"></h2>
+      </div>
+      <div class="controls">
+        <button class="btn primary" id="playAll" type="button"></button>
+        <div class="speed" id="speed" aria-label="Speech speed">
+          <button type="button" data-rate="0.65">0.65×</button>
+          <button type="button" data-rate="0.85">0.85×</button>
+          <button type="button" data-rate="1">1×</button>
+        </div>
+        <button class="btn" id="showAllEn" type="button">Show all English</button>
+      </div>
+    </div>
+    <div class="sentences" id="sentences"></div>
+    <div class="legend">
+      <span><i style="background:var(--new)"></i>New word</span>
+      <span><i style="background:var(--learning)"></i>Learning (you clicked it)</span>
+      <span><i style="background:var(--paper)"></i>Known</span>
+      <button class="reset" id="resetWords" type="button">Reset word colors</button>
+    </div>
+  </main>
+
+  <aside class="panel" id="panel">
+    <div id="panelBody"></div>
+  </aside>
+</div>
+
+<script>
+/* =====================================================================
+   STORIES — to add a new story, paste a new object into this array.
+   Format = the same JSON the prompts produce:
+   { title, level, sentences:[{de,en}], words:{ "form": {meaning, base} } }
+   Word lookup searches the "words" of ALL stories, so a new story only
+   needs entries for words that are not already listed somewhere.
+   ===================================================================== */
+const STORIES = [
+{
+  title: "Annas Tag",
+  level: "A1 · Story 1 · Daily routine",
+  sentences: [
+    { de: "Das ist Anna.", en: "This is Anna." },
+    { de: "Anna wohnt in Berlin.", en: "Anna lives in Berlin." },
+    { de: "Sie steht jeden Tag um sieben Uhr auf.", en: "She gets up every day at seven o'clock." },
+    { de: "Zuerst trinkt sie einen Kaffee.", en: "First she drinks a coffee." },
+    { de: "Dann isst sie Brot mit Käse.", en: "Then she eats bread with cheese." },
+    { de: "Um acht Uhr fährt sie mit dem Bus zur Arbeit.", en: "At eight o'clock she takes the bus to work." },
+    { de: "Anna arbeitet in einem Büro.", en: "Anna works in an office." },
+    { de: "Die Arbeit ist gut, aber manchmal lang.", en: "The work is good, but sometimes long." },
+    { de: "Am Mittag isst sie mit ihrer Kollegin.", en: "At noon she eats with her colleague." },
+    { de: "Sie essen Suppe und trinken Wasser.", en: "They eat soup and drink water." },
+    { de: "Nach der Arbeit geht Anna in den Supermarkt.", en: "After work Anna goes to the supermarket." },
+    { de: "Sie kauft Milch, Eier und Äpfel.", en: "She buys milk, eggs and apples." },
+    { de: "Am Abend ist sie wieder zu Hause.", en: "In the evening she is home again." },
+    { de: "Sie kocht Nudeln und ruft ihre Mutter an.", en: "She cooks pasta and calls her mother." },
+    { de: "Die Mutter fragt: „Wie geht es dir?“", en: "Her mother asks: \"How are you?\"" },
+    { de: "Anna sagt: „Gut, danke! Ich bin nur müde.“", en: "Anna says: \"Good, thanks! I'm just tired.\"" },
+    { de: "Um zehn Uhr geht sie ins Bett.", en: "At ten o'clock she goes to bed." },
+    { de: "Morgen ist wieder ein neuer Tag.", en: "Tomorrow is a new day again." }
+  ],
+  words: {
+    "das": { meaning: "this, that / the", base: "das" },
+    "ist": { meaning: "is", base: "sein (to be)" },
+    "anna": { meaning: "Anna (a name)", base: "Anna" },
+    "wohnt": { meaning: "lives", base: "wohnen (to live)" },
+    "in": { meaning: "in, into", base: "in" },
+    "berlin": { meaning: "Berlin", base: "Berlin" },
+    "sie": { meaning: "she / they / you (polite)", base: "sie / Sie" },
+    "steht": { meaning: "stands — with “auf”: gets up", base: "aufstehen (to get up)" },
+    "jeden": { meaning: "every", base: "jeder" },
+    "tag": { meaning: "day", base: "der Tag" },
+    "um": { meaning: "at (a time)", base: "um" },
+    "sieben": { meaning: "seven", base: "sieben (7)" },
+    "uhr": { meaning: "o'clock", base: "die Uhr (clock)" },
+    "auf": { meaning: "up (end part of “aufstehen”)", base: "aufstehen (to get up)" },
+    "zuerst": { meaning: "first, at first", base: "zuerst" },
+    "trinkt": { meaning: "drinks", base: "trinken (to drink)" },
+    "einen": { meaning: "a, an", base: "ein" },
+    "kaffee": { meaning: "coffee", base: "der Kaffee" },
+    "dann": { meaning: "then", base: "dann" },
+    "isst": { meaning: "eats", base: "essen (to eat)" },
+    "brot": { meaning: "bread", base: "das Brot" },
+    "mit": { meaning: "with / by (bus, car)", base: "mit" },
+    "käse": { meaning: "cheese", base: "der Käse" },
+    "acht": { meaning: "eight", base: "acht (8)" },
+    "fährt": { meaning: "goes, drives (by vehicle)", base: "fahren (to drive, to ride)" },
+    "dem": { meaning: "the", base: "der / das" },
+    "bus": { meaning: "bus", base: "der Bus" },
+    "zur": { meaning: "to the", base: "zu + der" },
+    "arbeit": { meaning: "work, job", base: "die Arbeit" },
+    "arbeitet": { meaning: "works", base: "arbeiten (to work)" },
+    "einem": { meaning: "a, an", base: "ein" },
+    "büro": { meaning: "office", base: "das Büro" },
+    "die": { meaning: "the", base: "die" },
+    "gut": { meaning: "good, well", base: "gut" },
+    "aber": { meaning: "but", base: "aber" },
+    "manchmal": { meaning: "sometimes", base: "manchmal" },
+    "lang": { meaning: "long", base: "lang" },
+    "am": { meaning: "at the, in the", base: "an + dem" },
+    "mittag": { meaning: "noon, midday", base: "der Mittag" },
+    "ihrer": { meaning: "her", base: "ihr" },
+    "kollegin": { meaning: "colleague (female)", base: "die Kollegin" },
+    "essen": { meaning: "eat", base: "essen (to eat)" },
+    "suppe": { meaning: "soup", base: "die Suppe" },
+    "und": { meaning: "and", base: "und" },
+    "trinken": { meaning: "drink", base: "trinken (to drink)" },
+    "wasser": { meaning: "water", base: "das Wasser" },
+    "nach": { meaning: "after", base: "nach" },
+    "der": { meaning: "the", base: "der" },
+    "geht": { meaning: "goes", base: "gehen (to go)" },
+    "den": { meaning: "the", base: "der" },
+    "supermarkt": { meaning: "supermarket", base: "der Supermarkt" },
+    "kauft": { meaning: "buys", base: "kaufen (to buy)" },
+    "milch": { meaning: "milk", base: "die Milch" },
+    "eier": { meaning: "eggs", base: "das Ei (egg)" },
+    "äpfel": { meaning: "apples", base: "der Apfel (apple)" },
+    "abend": { meaning: "evening", base: "der Abend" },
+    "wieder": { meaning: "again", base: "wieder" },
+    "zu": { meaning: "to — “zu Hause” = at home", base: "zu" },
+    "hause": { meaning: "home (in “zu Hause” = at home)", base: "das Haus (house)" },
+    "kocht": { meaning: "cooks", base: "kochen (to cook)" },
+    "nudeln": { meaning: "pasta, noodles", base: "die Nudel" },
+    "ruft": { meaning: "calls — with “an”: phones", base: "anrufen (to call, to phone)" },
+    "ihre": { meaning: "her", base: "ihr" },
+    "an": { meaning: "at / on — also end part of “anrufen”", base: "an" },
+    "mutter": { meaning: "mother", base: "die Mutter" },
+    "fragt": { meaning: "asks", base: "fragen (to ask)" },
+    "wie": { meaning: "how", base: "wie" },
+    "es": { meaning: "it", base: "es" },
+    "dir": { meaning: "you (informal) — “Wie geht es dir?” = How are you?", base: "du" },
+    "sagt": { meaning: "says", base: "sagen (to say)" },
+    "danke": { meaning: "thanks, thank you", base: "danke" },
+    "ich": { meaning: "I", base: "ich" },
+    "bin": { meaning: "am", base: "sein (to be)" },
+    "nur": { meaning: "only, just", base: "nur" },
+    "müde": { meaning: "tired", base: "müde" },
+    "zehn": { meaning: "ten", base: "zehn (10)" },
+    "ins": { meaning: "into the, to the", base: "in + das" },
+    "bett": { meaning: "bed", base: "das Bett" },
+    "morgen": { meaning: "tomorrow", base: "morgen" },
+    "ein": { meaning: "a, an", base: "ein" },
+    "neuer": { meaning: "new", base: "neu" }
+  }
+},
+{
+  title: "Tom geht einkaufen",
+  level: "A1 · Story 2 · Shopping & café",
+  sentences: [
+    { de: "Heute ist Samstag.", en: "Today is Saturday." },
+    { de: "Tom hat keine Arbeit.", en: "Tom has no work." },
+    { de: "Er geht in den Supermarkt.", en: "He goes to the supermarket." },
+    { de: "Er braucht Brot, Tomaten und Käse.", en: "He needs bread, tomatoes and cheese." },
+    { de: "Die Tomaten sind heute billig.", en: "The tomatoes are cheap today." },
+    { de: "Tom nimmt ein Kilo.", en: "Tom takes a kilo." },
+    { de: "An der Kasse fragt er: „Was kostet das?“", en: "At the checkout he asks: \"How much is that?\"" },
+    { de: "Die Frau sagt: „Das macht zwölf Euro, bitte.“", en: "The woman says: \"That's twelve euros, please.\"" },
+    { de: "Tom bezahlt mit Karte.", en: "Tom pays by card." },
+    { de: "„Danke! Schönes Wochenende!“", en: "\"Thanks! Have a nice weekend!\"" },
+    { de: "Dann geht Tom ins Café.", en: "Then Tom goes to the café." },
+    { de: "Dort wartet sein Freund Paul.", en: "His friend Paul is waiting there." },
+    { de: "„Hallo Paul! Wie geht's?“", en: "\"Hello Paul! How are you?\"" },
+    { de: "„Gut, danke. Und dir?“", en: "\"Good, thanks. And you?\"" },
+    { de: "Der Kellner kommt und fragt: „Was möchten Sie?“", en: "The waiter comes and asks: \"What would you like?\"" },
+    { de: "Tom sagt: „Ich möchte einen Kaffee, bitte.“", en: "Tom says: \"I'd like a coffee, please.\"" },
+    { de: "Paul nimmt einen Tee und ein Stück Kuchen.", en: "Paul takes a tea and a piece of cake." },
+    { de: "Sie sprechen lange über die Arbeit und die Familie.", en: "They talk for a long time about work and family." },
+    { de: "Das ist ein schöner Tag.", en: "That is a nice day." }
+  ],
+  words: {
+    "heute": { meaning: "today", base: "heute" },
+    "samstag": { meaning: "Saturday", base: "der Samstag" },
+    "tom": { meaning: "Tom (a name)", base: "Tom" },
+    "hat": { meaning: "has", base: "haben (to have)" },
+    "keine": { meaning: "no, not any", base: "kein" },
+    "er": { meaning: "he", base: "er" },
+    "braucht": { meaning: "needs", base: "brauchen (to need)" },
+    "tomaten": { meaning: "tomatoes", base: "die Tomate" },
+    "sind": { meaning: "are", base: "sein (to be)" },
+    "billig": { meaning: "cheap", base: "billig" },
+    "nimmt": { meaning: "takes", base: "nehmen (to take)" },
+    "kilo": { meaning: "kilo", base: "das Kilo" },
+    "kasse": { meaning: "checkout, till", base: "die Kasse" },
+    "was": { meaning: "what", base: "was" },
+    "kostet": { meaning: "costs — “Was kostet das?” = How much is it?", base: "kosten (to cost)" },
+    "frau": { meaning: "woman / Mrs.", base: "die Frau" },
+    "macht": { meaning: "makes — “Das macht…” = That comes to…", base: "machen (to make, to do)" },
+    "zwölf": { meaning: "twelve", base: "zwölf (12)" },
+    "euro": { meaning: "euros", base: "der Euro" },
+    "bitte": { meaning: "please", base: "bitte" },
+    "bezahlt": { meaning: "pays", base: "bezahlen (to pay)" },
+    "karte": { meaning: "card", base: "die Karte" },
+    "schönes": { meaning: "nice, beautiful", base: "schön" },
+    "wochenende": { meaning: "weekend", base: "das Wochenende" },
+    "café": { meaning: "café", base: "das Café" },
+    "dort": { meaning: "there", base: "dort" },
+    "wartet": { meaning: "waits, is waiting", base: "warten (to wait)" },
+    "sein": { meaning: "his", base: "sein" },
+    "freund": { meaning: "friend (male)", base: "der Freund" },
+    "paul": { meaning: "Paul (a name)", base: "Paul" },
+    "hallo": { meaning: "hello", base: "hallo" },
+    "geht's": { meaning: "“Wie geht's?” = How are you? (short for “geht es”)", base: "geht es" },
+    "kellner": { meaning: "waiter", base: "der Kellner" },
+    "kommt": { meaning: "comes", base: "kommen (to come)" },
+    "möchten": { meaning: "would like", base: "möchten" },
+    "möchte": { meaning: "would like", base: "möchten" },
+    "tee": { meaning: "tea", base: "der Tee" },
+    "stück": { meaning: "piece", base: "das Stück" },
+    "kuchen": { meaning: "cake", base: "der Kuchen" },
+    "sprechen": { meaning: "speak, talk", base: "sprechen (to speak)" },
+    "lange": { meaning: "for a long time", base: "lange" },
+    "über": { meaning: "about / over", base: "über" },
+    "familie": { meaning: "family", base: "die Familie" },
+    "schöner": { meaning: "nice, beautiful", base: "schön" }
+  }
+}
+];
+
+/* ---------- dictionary (all stories merged) ---------- */
+const DICT = {};
+STORIES.forEach(s => Object.assign(DICT, s.words));
+
+/* ---------- saved word colors (this browser only) ---------- */
+const STORE_KEY = "dreader-status-v1";
+let status = {};
+try { status = JSON.parse(localStorage.getItem(STORE_KEY) || "{}") || {}; } catch (e) { status = {}; }
+function saveStatus() { try { localStorage.setItem(STORE_KEY, JSON.stringify(status)); } catch (e) {} }
+function stateOf(k) { return status[k] || "new"; }
+
+/* ---------- speech (built into the browser, no audio files) ---------- */
+let rate = 0.85;
+let deVoice = null;
+function pickVoice() {
+  const vs = (window.speechSynthesis && speechSynthesis.getVoices()) || [];
+  const de = vs.filter(v => /^de(-|_|$)/i.test(v.lang));
+  const pref = ["natural", "google", "katja", "anna", "petra", "helena", "markus"];
+  deVoice = de.find(v => pref.some(p => v.name.toLowerCase().includes(p))) || de[0] || null;
+}
+if (window.speechSynthesis) { pickVoice(); speechSynthesis.onvoiceschanged = pickVoice; }
+
+function speak(text, opts = {}) {
+  if (!window.speechSynthesis) return null;
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = "de-DE";
+  if (deVoice) u.voice = deVoice;
+  u.rate = opts.rate || rate;
+  if (opts.onend) u.onend = opts.onend;
+  if (!opts.queue) speechSynthesis.cancel();
+  speechSynthesis.speak(u);
+  return u;
+}
+
+/* ---------- rendering ---------- */
+const ICON = {
+  play: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13a1 1 0 0 0 1.5.86l10.5-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5z"/></svg>',
+  stop: '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>',
+  speaker: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>',
+  close: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>'
+};
+
+let current = 0;
+let activeKey = null;
+let playingAll = false;
+
+const $ = id => document.getElementById(id);
+
+function renderTabs() {
+  $("tabs").innerHTML = "";
+  STORIES.forEach((s, i) => {
+    const b = document.createElement("button");
+    b.className = "tab"; b.type = "button"; b.setAttribute("role", "tab");
+    b.textContent = (i + 1) + ". " + s.title;
+    b.setAttribute("aria-selected", i === current ? "true" : "false");
+    b.onclick = () => { stopAll(); current = i; try { localStorage.setItem("dreader-story", i); } catch (e) {} renderTabs(); renderStory(); };
+    $("tabs").appendChild(b);
+  });
+}
+
+function tokenize(text) {
+  // words keep letters, digits and apostrophes (e.g. "geht's"); everything else is punctuation
+  const out = []; const re = /[\p{L}\p{N}']+/gu; let last = 0, m;
+  while ((m = re.exec(text))) {
+    if (m.index > last) out.push({ t: text.slice(last, m.index) });
+    out.push({ t: m[0], w: true });
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) out.push({ t: text.slice(last) });
+  return out;
+}
+
+function renderStory() {
+  const s = STORIES[current];
+  $("storyTitle").textContent = s.title;
+  $("storyLvl").textContent = s.level;
+  const box = $("sentences"); box.innerHTML = "";
+  s.sentences.forEach((sen, i) => {
+    const row = document.createElement("div"); row.className = "sent"; row.id = "sent-" + i;
+    const pb = document.createElement("button"); pb.className = "play"; pb.type = "button";
+    pb.setAttribute("aria-label", "Play sentence"); pb.innerHTML = ICON.speaker;
+    pb.onclick = () => { stopAll(); highlightSentence(i); speak(sen.de, { onend: () => highlightSentence(-1) }); };
+    const col = document.createElement("div");
+    const de = document.createElement("div"); de.className = "de";
+    tokenize(sen.de).forEach(tok => {
+      if (!tok.w) { de.appendChild(document.createTextNode(tok.t)); return; }
+      const sp = document.createElement("span");
+      const key = tok.t.toLowerCase();
+      sp.className = "w"; sp.textContent = tok.t; sp.dataset.k = key; sp.tabIndex = 0;
+      sp.setAttribute("role", "button");
+      sp.onclick = () => openWord(key, tok.t);
+      sp.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openWord(key, tok.t); } };
+      de.appendChild(sp);
+    });
+    const enRow = document.createElement("div"); enRow.className = "en-row";
+    const t = document.createElement("button"); t.className = "en-toggle"; t.type = "button"; t.textContent = "EN";
+    const en = document.createElement("span"); en.className = "en"; en.textContent = sen.en; en.hidden = true;
+    t.onclick = () => { en.hidden = !en.hidden; };
+    enRow.append(t, en);
+    col.append(de, enRow);
+    row.append(pb, col);
+    box.appendChild(row);
+  });
+  paintWords();
+  updatePlayAll();
+  $("showAllEn").textContent = "Show all English";
+}
+
+function paintWords() {
+  document.querySelectorAll(".w").forEach(el => {
+    const st = stateOf(el.dataset.k);
+    el.classList.toggle("s-new", st === "new");
+    el.classList.toggle("s-learning", st === "learning");
+    el.classList.toggle("active", el.dataset.k === activeKey);
+  });
+}
+
+function openWord(key, shown) {
+  activeKey = key;
+  if (stateOf(key) === "new") { status[key] = "learning"; saveStatus(); }
+  paintWords();
+  speak(shown);
+  const d = DICT[key];
+  const st = stateOf(key);
+  $("panel").classList.remove("closed");
+  $("panelBody").innerHTML = `
+    <div class="p-word">
+      <h3>${esc(shown)}</h3>
+      <button class="iconbtn" type="button" id="pSay" aria-label="Hear word">${ICON.speaker}</button>
+      <button class="iconbtn p-close" type="button" id="pClose" aria-label="Close">${ICON.close}</button>
+    </div>
+    <div class="p-base">${d ? "Base form: " + esc(d.base) : ""}</div>
+    <div class="p-label">Meaning</div>
+    <div class="p-meaning">${d ? esc(d.meaning) : "No meaning saved for this word yet"}</div>
+    <div class="p-actions">
+      <button class="btn" type="button" id="pSlow">Hear slowly</button>
+      <button class="btn" type="button" id="pSpell">Spell it</button>
+      <button class="btn ${st === "known" ? "" : "primary"}" type="button" id="pKnown">${st === "known" ? "Mark as learning" : "I know this word"}</button>
+    </div>
+    <div class="p-spell" id="pSpellOut"></div>`;
+  $("pSay").onclick = () => speak(shown);
+  $("pSlow").onclick = () => speak(shown, { rate: 0.55 });
+  $("pSpell").onclick = () => spell(shown);
+  $("pKnown").onclick = () => { status[key] = stateOf(key) === "known" ? "learning" : "known"; saveStatus(); openWord(key, shown); };
+  $("pClose").onclick = closePanel;
+}
+
+const LETTER = { "ä": "ä", "ö": "ö", "ü": "ü", "ß": "Eszett", "'": "Apostroph" };
+function spell(word) {
+  const letters = [...word.toLowerCase()];
+  $("pSpellOut").textContent = letters.join(" ").toUpperCase().replace("SS", "SS");
+  speak(letters.map(c => LETTER[c] || c.toUpperCase()).join(", "), { rate: 0.7 });
+}
+
+function closePanel() { $("panel").classList.add("closed"); activeKey = null; paintWords(); }
+
+function emptyPanel() {
+  $("panelBody").innerHTML = `<div class="empty">
+    <p><strong>Click any word</strong> in the story to see its English meaning and hear it.</p>
+    <p>Words you click turn yellow. Mark them as known when you're sure, and they lose their color.</p>
+    <p>Use the speaker next to a sentence to hear the whole sentence, or press play to hear the story.</p>
+    <div class="note" id="voiceNote"></div></div>`;
+  setTimeout(() => {
+    const n = $("voiceNote"); if (!n) return;
+    if (!window.speechSynthesis) n.textContent = "Your browser has no speech voice, so audio won't play here. Try Chrome, Edge or Safari.";
+    else if (deVoice) n.textContent = "German voice: " + deVoice.name;
+    else n.textContent = "No German voice found on this device yet. Audio may sound English. On Windows add German in Settings › Time & language › Speech.";
+  }, 600);
+}
+
+/* ---------- play whole story ---------- */
+function highlightSentence(i) {
+  document.querySelectorAll(".sent").forEach((el, j) => el.classList.toggle("playing", j === i));
+  if (i >= 0) { const el = $("sent-" + i); el && el.scrollIntoView({ block: "nearest", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" }); }
+}
+function updatePlayAll() { $("playAll").innerHTML = (playingAll ? ICON.stop + "Stop" : ICON.play + "Play story"); }
+function stopAll() { playingAll = false; if (window.speechSynthesis) speechSynthesis.cancel(); highlightSentence(-1); updatePlayAll(); }
+function playFrom(i) {
+  const s = STORIES[current];
+  if (!playingAll || i >= s.sentences.length) { stopAll(); return; }
+  highlightSentence(i);
+  speak(s.sentences[i].de, { onend: () => setTimeout(() => playFrom(i + 1), 350) });
+}
+$("playAll").onclick = () => { if (playingAll) { stopAll(); return; } stopAll(); playingAll = true; updatePlayAll(); playFrom(0); };
+
+/* ---------- controls ---------- */
+document.querySelectorAll("#speed button").forEach(b => {
+  b.setAttribute("aria-pressed", Number(b.dataset.rate) === rate ? "true" : "false");
+  b.onclick = () => { rate = Number(b.dataset.rate); document.querySelectorAll("#speed button").forEach(x => x.setAttribute("aria-pressed", x === b ? "true" : "false")); };
+});
+$("showAllEn").onclick = () => {
+  const ens = [...document.querySelectorAll(".en")];
+  const show = ens.some(e => e.hidden);
+  ens.forEach(e => e.hidden = !show);
+  $("showAllEn").textContent = show ? "Hide all English" : "Show all English";
+};
+$("resetWords").onclick = () => { status = {}; saveStatus(); paintWords(); };
+
+function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+
+try { const sv = Number(localStorage.getItem("dreader-story")); if (sv >= 0 && sv < STORIES.length) current = sv; } catch (e) {}
+renderTabs(); renderStory(); emptyPanel();
+if (matchMedia("(max-width: 860px)").matches) $("panel").classList.add("closed");
+</script>
+</body>
+</html>
