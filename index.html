@@ -136,8 +136,8 @@ header.top { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: c
       <div class="controls">
         <button class="btn primary" id="playAll" type="button"></button>
         <div class="speed" id="speed" aria-label="Speech speed">
-          <button type="button" data-rate="0.65">0.65×</button>
-          <button type="button" data-rate="0.85">0.85×</button>
+          <button type="button" data-rate="0.75">0.75×</button>
+          <button type="button" data-rate="0.9">0.9×</button>
           <button type="button" data-rate="1">1×</button>
         </div>
         <button class="btn" id="showAllEn" type="button">Show all English</button>
@@ -358,7 +358,7 @@ function saveStatus() { try { localStorage.setItem(STORE_KEY, JSON.stringify(sta
 function stateOf(k) { return status[k] || "new"; }
 
 /* ---------- speech (built into the browser, no audio files) ---------- */
-let rate = 0.85;
+let rate = 0.9;
 let deVoice = null;
 function pickVoice() {
   const vs = (window.speechSynthesis && speechSynthesis.getVoices()) || [];
@@ -394,6 +394,51 @@ function speak(text, opts = {}) {
   };
   if (wasBusy && !opts.queue) setTimeout(go, 80); else go();
   return true;
+}
+
+/* ---------- recorded clips (audio/ folder) ----------
+   audio/w/<word>.mp3   word, normal speed
+   audio/ws/<word>.mp3  word, slow
+   audio/s/<story>-<sentence>.mp3  sentence
+   audio/l/<letter>.mp3 letter names for spelling
+   If a clip is missing (e.g. a new story without audio yet),
+   the browser's own voice is used instead. */
+function slug(k) {
+  return k.replace(/ä/g, "ae").replace(/ö/g, "oe").replace(/ü/g, "ue")
+          .replace(/ß/g, "ss").replace(/é/g, "e").replace(/'/g, "_");
+}
+const player = new Audio();
+player.preload = "auto";
+let clipToken = 0;
+function playClips(list, opts = {}) {
+  if (window.speechSynthesis) { speakToken++; speechSynthesis.cancel(); }
+  const tok = ++clipToken;
+  let idx = 0;
+  const next = () => {
+    if (tok !== clipToken) return;
+    if (idx >= list.length) { opts.onend && opts.onend(); return; }
+    const it = list[idx++];
+    let fell = false;
+    const fallback = () => {
+      if (fell || tok !== clipToken) return;
+      fell = true;
+      speak(it.text, { rate: opts.slow ? 0.55 : rate, onend: () => setTimeout(next, opts.gap || 0) });
+    };
+    player.onended = () => setTimeout(next, opts.gap || 0);
+    player.onerror = fallback;
+    player.src = it.src;
+    player.playbackRate = opts.fixedRate || rate;
+    const p = player.play();
+    if (p && p.catch) p.catch(e => { if (e && e.name !== "AbortError") fallback(); });
+  };
+  next();
+}
+function stopClips() { clipToken++; try { player.pause(); } catch (e) {} }
+function sayWord(key, shown) { playClips([{ src: "audio/w/" + slug(key) + ".mp3", text: shown }], { fixedRate: 1 }); }
+function sayWordSlow(key, shown) { playClips([{ src: "audio/ws/" + slug(key) + ".mp3", text: shown }], { fixedRate: 1, slow: true }); }
+function saySentence(i, onend) {
+  const sen = STORIES[current].sentences[i];
+  playClips([{ src: "audio/s/" + current + "-" + i + ".mp3", text: sen.de }], { onend });
 }
 
 /* ---------- rendering ---------- */
@@ -443,7 +488,7 @@ function renderStory() {
     const row = document.createElement("div"); row.className = "sent"; row.id = "sent-" + i;
     const pb = document.createElement("button"); pb.className = "play"; pb.type = "button";
     pb.setAttribute("aria-label", "Play sentence"); pb.innerHTML = ICON.speaker;
-    pb.onclick = () => { stopAll(); highlightSentence(i); speak(sen.de, { onend: () => highlightSentence(-1) }); };
+    pb.onclick = () => { stopAll(); highlightSentence(i); saySentence(i, () => highlightSentence(-1)); };
     const col = document.createElement("div");
     const de = document.createElement("div"); de.className = "de";
     tokenize(sen.de).forEach(tok => {
@@ -483,7 +528,7 @@ function openWord(key, shown) {
   activeKey = key;
   if (stateOf(key) === "new") { status[key] = "learning"; saveStatus(); }
   paintWords();
-  speak(shown);
+  sayWord(key, shown);
   const d = DICT[key];
   const st = stateOf(key);
   $("panel").classList.remove("closed");
@@ -502,8 +547,8 @@ function openWord(key, shown) {
       <button class="btn ${st === "known" ? "" : "primary"}" type="button" id="pKnown">${st === "known" ? "Mark as learning" : "I know this word"}</button>
     </div>
     <div class="p-spell" id="pSpellOut"></div>`;
-  $("pSay").onclick = () => speak(shown);
-  $("pSlow").onclick = () => speak(shown, { rate: 0.55 });
+  $("pSay").onclick = () => sayWord(key, shown);
+  $("pSlow").onclick = () => sayWordSlow(key, shown);
   $("pSpell").onclick = () => spell(shown);
   $("pKnown").onclick = () => { status[key] = stateOf(key) === "known" ? "learning" : "known"; saveStatus(); openWord(key, shown); };
   $("pClose").onclick = closePanel;
@@ -513,7 +558,7 @@ const LETTER = { "ä": "ä", "ö": "ö", "ü": "ü", "ß": "Eszett", "'": "Apost
 function spell(word) {
   const letters = [...word.toLowerCase()];
   $("pSpellOut").textContent = letters.join(" ").toUpperCase().replace("SS", "SS");
-  speak(letters.map(c => LETTER[c] || c.toUpperCase()).join(", "), { rate: 0.7 });
+  playClips(letters.map(c => ({ src: "audio/l/" + slug(c) + ".mp3", text: LETTER[c] || c.toUpperCase() })), { fixedRate: 1, gap: 120 });
 }
 
 function closePanel() { $("panel").classList.add("closed"); activeKey = null; paintWords(); }
@@ -525,13 +570,8 @@ function emptyPanel() {
     <p>Use the speaker next to a sentence to hear the whole sentence, or press play to hear the story.</p>
     <button class="btn" type="button" id="testSound">Test sound</button>
     <div class="note" id="voiceNote"></div></div>`;
-  $("testSound").onclick = () => speak("Hallo! Das ist deine deutsche Stimme.");
-  setTimeout(() => {
-    const n = $("voiceNote"); if (!n) return;
-    if (!window.speechSynthesis) n.textContent = "Your browser has no speech voice, so audio won't play here. Try Chrome, Edge or Safari.";
-    else if (deVoice) n.textContent = "German voice: " + deVoice.name;
-    else n.textContent = "No German voice found on this device yet. Audio may sound English. On Windows add German in Settings › Time & language › Speech.";
-  }, 600);
+  $("testSound").onclick = () => playClips([{ src: "audio/test.mp3", text: "Hallo! Das ist deine deutsche Stimme." }], { fixedRate: 1 });
+  $("voiceNote").textContent = "Audio: recorded German voice files. Words without a recording use your browser's voice instead.";
 }
 
 /* ---------- play whole story ---------- */
@@ -540,12 +580,12 @@ function highlightSentence(i) {
   if (i >= 0) { const el = $("sent-" + i); el && el.scrollIntoView({ block: "nearest", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" }); }
 }
 function updatePlayAll() { $("playAll").innerHTML = (playingAll ? ICON.stop + "Stop" : ICON.play + "Play story"); }
-function stopAll() { playingAll = false; speakToken++; if (window.speechSynthesis) speechSynthesis.cancel(); highlightSentence(-1); updatePlayAll(); }
+function stopAll() { playingAll = false; speakToken++; stopClips(); if (window.speechSynthesis) speechSynthesis.cancel(); highlightSentence(-1); updatePlayAll(); }
 function playFrom(i) {
   const s = STORIES[current];
   if (!playingAll || i >= s.sentences.length) { stopAll(); return; }
   highlightSentence(i);
-  speak(s.sentences[i].de, { onend: () => setTimeout(() => playFrom(i + 1), 350) });
+  saySentence(i, () => setTimeout(() => playFrom(i + 1), 350));
 }
 $("playAll").onclick = () => { if (playingAll) { stopAll(); return; } stopAll(); playingAll = true; updatePlayAll(); playFrom(0); };
 
